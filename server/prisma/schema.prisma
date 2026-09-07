@@ -1,0 +1,298 @@
+// Prisma schema for ReMedistribution
+// Medicine redistribution platform database (SQLite)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Models ──────────────────────────────────────────────────────────
+// Enums stored as Strings for SQLite compatibility:
+// UserRole: DONOR, PHARMACIST, PATIENT, ADMIN
+// CenterType: HOSPITAL, PHARMACY, NGO
+// DonationStatus: PENDING, SCANNED, VERIFIED, APPROVED, REJECTED, MATCHED, DISPATCHED
+// InventoryStatus: AVAILABLE, RESERVED, DISPATCHED, EXPIRED
+// UrgencyLevel: LOW, MEDIUM, HIGH, CRITICAL
+// RequestStatus: PENDING, MATCHED, FULFILLED, CANCELLED
+// RiskLevel: LOW, MEDIUM, HIGH
+
+model User {
+  id            String   @id @default(uuid())
+  name          String
+  email         String   @unique
+  password      String
+  role          String   @default("DONOR") // DONOR, PHARMACIST, PATIENT, ADMIN
+  phone         String?
+  cnic          String?
+  address       String?
+  city          String?
+  lat           Float?
+  lng           Float?
+  centerId      String?
+  avatarUrl     String?
+  emailVerified Boolean  @default(false)
+  verificationCode String?
+  verificationCodeExpiry DateTime?
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  center          CollectionCenter?   @relation(fields: [centerId], references: [id])
+  donations       Donation[]
+  patientRequests PatientRequest[]
+  verifications   Donation[]          @relation("VerifiedBy")
+  verificationRecords Verification[]
+  notifications   Notification[]
+  queries         Query[]
+  passwordResetTokens PasswordResetToken[]
+
+  @@index([centerId])
+  @@map("users")
+}
+
+model CollectionCenter {
+  id          String   @id @default(uuid())
+  name        String
+  address     String
+  city        String
+  phone       String?
+  email       String?
+  type        String   @default("NGO") // HOSPITAL, PHARMACY, NGO
+  lat         Float
+  lng         Float
+  isActive    Boolean  @default(true)
+  openTime    String?  // e.g., "08:00"
+  closeTime   String?  // e.g., "20:00"
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  donations      Donation[]
+  inventoryItems InventoryItem[]
+  pharmacists    User[]
+
+  @@map("collection_centers")
+}
+
+model Medicine {
+  id           String   @id @default(uuid())
+  name         String
+  genericName  String?
+  category     String   // e.g., "Diabetes", "Cardiovascular", "Antibiotics"
+  manufacturer String?
+  dosage       String?  // e.g., "500mg", "100IU"
+  form         String?  // e.g., "Tablet", "Injection", "Syrup"
+  requiresColdChain Boolean @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  donations      Donation[]
+  inventoryItems InventoryItem[]
+
+  @@map("medicines")
+}
+
+model Donation {
+  id               String   @id @default(uuid())
+  donorId          String
+  medicineId       String
+  centerId         String?
+  verifiedById     String?  @map("verified_by_id")
+  status           String   @default("PENDING") // PENDING, SCANNED, VERIFIED, APPROVED, REJECTED, MATCHED, DISPATCHED
+  quantity         Int      @default(1)
+  batchNumber      String?
+  expiryDate       DateTime?
+  sealIntact       Boolean?
+  storageVerified  Boolean?
+  photos           String   @default("[]") // JSON array of photo URLs
+  aiRiskScore      String?  // LOW, MEDIUM, HIGH
+  aiConfidence     Float?
+  aiNotes          String?
+  aiOcrResult      String?  // JSON snapshot of OCR fields from /api/ai/ocr
+  aiVisionResult   String?  // JSON snapshot of vision flags from /api/ai/vision
+  pharmacistNotes  String?
+  scannedText      String?  // Raw OCR output
+  ocrConfidence    Float?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  // Relations
+  donor           User              @relation(fields: [donorId], references: [id])
+  medicine        Medicine          @relation(fields: [medicineId], references: [id])
+  center          CollectionCenter? @relation(fields: [centerId], references: [id])
+  verifiedBy      User?             @relation("VerifiedBy", fields: [verifiedById], references: [id])
+  inventoryItem   InventoryItem?
+  verifications   Verification[]
+
+  @@index([donorId])
+  @@index([centerId])
+  @@index([status])
+  @@map("donations")
+}
+
+model Verification {
+  id             String   @id @default(uuid())
+  donationId     String   @map("donation_id")
+  pharmacistId   String   @map("pharmacist_id")
+  decision       String   // APPROVED or REJECTED
+  reason         String?
+  checklist      String   @default("{}") // JSON snapshot of pharmacist checklist answers
+  aiSnapshot     String   @default("{}") @map("ai_snapshot") // JSON snapshot of AI outputs at decision time
+  notes          String?
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  // Relations
+  donation       Donation @relation(fields: [donationId], references: [id], onDelete: Cascade)
+  pharmacist     User     @relation(fields: [pharmacistId], references: [id])
+
+  @@index([donationId])
+  @@index([pharmacistId])
+  @@index([createdAt])
+  @@map("verifications")
+}
+
+model InventoryItem {
+  id           String   @id @default(uuid())
+  centerId     String
+  medicineId   String
+  donationId   String?  @unique
+  quantity     Int      @default(1)
+  status       String   @default("AVAILABLE") // AVAILABLE, RESERVED, DISPATCHED, EXPIRED
+  batchNumber  String?
+  expiryDate   DateTime?
+  receivedAt   DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  center   CollectionCenter @relation(fields: [centerId], references: [id])
+  medicine Medicine         @relation(fields: [medicineId], references: [id])
+  donation Donation?        @relation(fields: [donationId], references: [id])
+  matches  Match[]
+
+  @@index([centerId])
+  @@index([medicineId])
+  @@index([status])
+  @@index([expiryDate])
+  @@map("inventory_items")
+}
+
+model PatientRequest {
+  id           String   @id @default(uuid())
+  patientId    String
+  medicineName String
+  medicineId   String?
+  urgency      String   @default("MEDIUM") // LOW, MEDIUM, HIGH, CRITICAL
+  location     String?
+  city         String?
+  lat          Float?
+  lng          Float?
+  description  String?
+  quantity     Int      @default(1)
+  status       String   @default("PENDING") // PENDING, MATCHED, FULFILLED, CANCELLED
+  chatInput    String?  // Original free-text input from chatbot
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  patient User    @relation(fields: [patientId], references: [id])
+  matches Match[]
+
+  @@index([patientId])
+  @@index([status])
+  @@index([urgency])
+  @@map("patient_requests")
+}
+
+model Match {
+  id                  String    @id @default(uuid())
+  inventoryItemId     String
+  patientRequestId    String
+  score               Float?    // Matching score (0-100)
+  status              String    @default("ACTIVE") // ACTIVE, READY_FOR_PICKUP, PICKED_UP, COMPLETED, CANCELLED
+  pickupCode          String?   // 6-digit code for patient pickup
+  pickupCodeExpiresAt DateTime?
+  fulfillmentHistory  String?   // JSON array of {status, timestamp, actorId, notes}
+  matchedAt           DateTime  @default(now())
+  completedAt         DateTime?
+
+  // Relations
+  inventoryItem  InventoryItem  @relation(fields: [inventoryItemId], references: [id])
+  patientRequest PatientRequest @relation(fields: [patientRequestId], references: [id])
+
+  @@index([inventoryItemId])
+  @@index([patientRequestId])
+  @@index([pickupCode])
+  @@map("matches")
+}
+
+model DemandForecast {
+  id          String   @id @default(uuid())
+  city        String
+  category    String   // Medicine category
+  month       String   // e.g., "2025-01"
+  predicted   Int      // Predicted demand quantity
+  actual      Int?     // Actual demand (filled later)
+  confidence  Float?
+  createdAt   DateTime @default(now())
+
+  @@unique([city, category, month])
+  @@map("demand_forecasts")
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  type      String        // DONATION_RECEIVED, MATCH_FOUND, PICKUP_READY, EXPIRING_SOON, etc.
+  title     String
+  message   String
+  isRead    Boolean  @default(false)
+  link      String?       // Deep link to related page
+  metadata  String?       // JSON string with extra context
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, isRead])
+  @@map("notifications")
+}
+
+model PasswordResetToken {
+  id        String    @id @default(uuid())
+  userId    String
+  token     String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("password_reset_tokens")
+}
+
+model Query {
+  id          String   @id @default(uuid())
+  userId      String
+  subject     String
+  message     String
+  status      String   @default("OPEN") // OPEN, IN_PROGRESS, RESOLVED, CLOSED
+  priority    String   @default("MEDIUM") // LOW, MEDIUM, HIGH, URGENT
+  adminReply  String?
+  repliedById String?
+  repliedAt   DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("queries")
+}
