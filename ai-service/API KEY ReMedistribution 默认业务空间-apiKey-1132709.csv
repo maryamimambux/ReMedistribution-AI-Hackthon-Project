@@ -1,0 +1,8 @@
+﻿id,1132709
+apiKey,sk-ws-H.DDIHPMX.DLIm.MEUCIDrVtmz35eQAuo-Yg2lgYg-TwuZnPF0lFSfYDVGMiT8VAiEAmxcIgGpMs-qwwXdDINFbucu34Q1jelbWAdVw1i_IRto
+apiHost,ws-w3go0g29df1e8bma.ap-southeast-1.maas.aliyuncs.com
+openAiCompatible,https://ws-w3go0g29df1e8bma.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1
+dashScope,https://ws-w3go0g29df1e8bma.ap-southeast-1.maas.aliyuncs.com/api/v1
+description,medicine AI hackathon
+workspaceName,默认业务空间
+workspaceId,ws-w3go0g29df1e8bma
