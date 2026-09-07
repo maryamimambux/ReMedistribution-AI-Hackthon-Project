@@ -1,0 +1,63 @@
+# ─── ReMedistribution — Docker Compose ───────────────────────────────
+# One-command startup: docker compose up -d
+# Access app at http://localhost
+# API at http://localhost/api
+# DB: postgresql://remedistribution:remedistribution@localhost:5432/remedistribution
+
+version: '3.8'
+
+services:
+  # ─── PostgreSQL ────────────────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: remedistribution
+      POSTGRES_PASSWORD: remedistribution
+      POSTGRES_DB: remedistribution
+    ports:
+      - '5432:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U remedistribution']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ─── Backend API ──────────────────────────────────────────────────
+  server:
+    build: ./server
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - '5000:5000'
+    environment:
+      DATABASE_URL: postgresql://remedistribution:remedistribution@db:5432/remedistribution
+      JWT_SECRET: ${JWT_SECRET:-remedistribution-production-secret-change-me}
+      JWT_EXPIRES_IN: 7d
+      PORT: 5000
+      NODE_ENV: production
+      CLIENT_URL: http://localhost
+      AI_SERVICE_URL: http://ai-service:8000
+      SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
+      SENDGRID_FROM_EMAIL: ${SENDGRID_FROM_EMAIL:-noreply@remedistribution.com}
+    volumes:
+      - uploads:/app/uploads
+    command: >
+      sh -c "npx prisma migrate deploy && node prisma/seed.js && node src/index.js"
+
+  # ─── Frontend (Nginx) ─────────────────────────────────────────────
+  client:
+    build: ./client
+    restart: unless-stopped
+    depends_on:
+      - server
+    ports:
+      - '80:80'
+
+volumes:
+  pgdata:
+  uploads:
